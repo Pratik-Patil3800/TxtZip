@@ -1,0 +1,53 @@
+body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background-image: url(backgroundimg.jpg);
+}
+
+h2{
+    color: white;
+}
+
+.btn{
+   text-decoration: none;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.5);
+    box-shadow: 0 8px 32px rgba(255, 255, 255, 0.1); 
+    backdrop-filter: blur(10px);
+    color:black; 
+    font-size: 18px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+.btn1{
+  text-decoration: none;
+  display: none;
+   padding: 10px 20px;
+   border: none;
+   border-radius: 6px;
+   background-color: rgba(255, 255, 255, 0.5);
+   box-shadow: 0 8px 32px rgba(255, 255, 255, 0.1); 
+   backdrop-filter: blur(10px);
+   color:black; 
+   font-size: 18px;
+   cursor: pointer;
+   transition: background-color 0.3s ease;
+}
+
+  .btn:hover {
+    background-color: rgba(255, 255, 255, 0.7); 
+  }
+
+  .wraper{
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .active{
+    display: flex;
+  }
