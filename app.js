@@ -72,7 +72,7 @@ app.post('/compress',upload.single("fileinput"), (req, res) => {
 });
 
 app.post('/decompress',upload.single("fileinput"), (req, res) => {
-    
+    const exePath = path.join(__dirname, 'example.exe');
     const command = `example.exe decompress ${req.file.path}`;
 
     exec(command, (error, stdout, stderr) => {
