@@ -34,7 +34,7 @@ const storage=multer.diskStorage({
 const upload=multer({storage});
 app.post('/compress',upload.single("fileinput"), (req, res) => {
     const exePath = path.join(__dirname, 'example.exe'); 
-    const command = `"${exePath}" compress "${req.file.path}"`;
+    const command = `wine "${exePath}" compress "${req.file.path}"`;
 
    
     exec(command, (error, stdout, stderr) => {
