@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "run": "nodemon app.js",
-    "start":"node app.js",
+    "start": "chmod +x ./example.exe && node app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
