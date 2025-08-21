@@ -23,7 +23,7 @@ public:
 private:
     struct Node {
         char ch;
-        int freq;
+        unsigned long long freq;
         Node *left;
         Node *right;
 
@@ -37,13 +37,14 @@ private:
 
     Node *root;
     unordered_map<char, string> huffmanCodes;
-    unordered_map<char, int> freqTable;
+    unordered_map<char, unsigned long long> freqTable;
 
     void buildFrequencyTable(const string& text);
     void buildTree();
     string compress();
-    string getHeader(int offset);
+    string getHeader();
     void generateCodes(Node *node, const string& code);
+    void freeTree(Node* node) ;
 };
 
 #endif 

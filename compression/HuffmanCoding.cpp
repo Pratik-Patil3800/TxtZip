@@ -2,29 +2,59 @@
 #include <fstream>
 #include <iostream>
 #include <bitset>
+#include <mutex>
+#include <thread>
 
-// Constructor
-HuffmanCoding::HuffmanCoding() {
+std::mutex freqMutex;
 
- }
+// ---------- Constructor / Destructor ----------
 
-// Destructor
+HuffmanCoding::HuffmanCoding() : root(nullptr) {}
+
 HuffmanCoding::~HuffmanCoding() {
-    // Optional: implement recursive delete if no smart pointers are used
+    freeTree(root);
 }
 
-// Build frequency table from text
-void HuffmanCoding::buildFrequencyTable(const string& text) {
+void HuffmanCoding::freeTree(Node* node) {
+    if (!node) return;
+    freeTree(node->left);
+    freeTree(node->right);
+    delete node;
+}
+
+// ---------- Build Frequency Table (Multithreaded) ----------
+
+void HuffmanCoding::buildFrequencyTable(const std::string& text) {
     freqTable.clear();
-    for (char ch : text) {
-        freqTable[ch]++;
+
+    int numThreads = std::thread::hardware_concurrency();
+    if (numThreads == 0) numThreads = 4;
+
+    int chunkSize = text.size() / numThreads;
+    std::vector<std::thread> threads;
+
+    auto worker = [&](int start, int end) {
+        std::unordered_map<char, int> localFreq;
+        for (int i = start; i < end; i++) {
+            localFreq[text[i]]++;
+        }
+        std::lock_guard<std::mutex> lock(freqMutex);
+        for (auto& p : localFreq) freqTable[p.first] += p.second;
+    };
+
+    for (int i = 0; i < numThreads; i++) {
+        int start = i * chunkSize;
+        int end = (i == numThreads - 1) ? text.size() : start + chunkSize;
+        threads.emplace_back(worker, start, end);
     }
+
+    for (auto& t : threads) t.join();
 }
 
-// Build Huffman Tree from frequency table
-void HuffmanCoding::buildTree() {
-    priority_queue<Node*, vector<Node*>, Compare> pq;
+// ---------- Build Huffman Tree ----------
 
+void HuffmanCoding::buildTree() {
+    std::priority_queue<Node*, std::vector<Node*>, Compare> pq;
     for (auto& pair : freqTable) {
         pq.push(new Node(pair.first, pair.second));
     }
@@ -39,15 +69,16 @@ void HuffmanCoding::buildTree() {
         pq.push(parent);
     }
 
-    root= pq.empty() ? nullptr : pq.top();
+    root = pq.empty() ? nullptr : pq.top();
 }
 
-// Recursively generate Huffman codes
-void HuffmanCoding::generateCodes(Node* node, const string& code) {
+// ---------- Generate Huffman Codes ----------
+
+void HuffmanCoding::generateCodes(Node* node, const std::string& code) {
     if (!node) return;
 
     if (node->isLeaf()) {
-        huffmanCodes[node->ch] = code;
+        huffmanCodes[node->ch] = code.empty() ? "0" : code; // Edge case: single char
         return;
     }
 
@@ -55,45 +86,53 @@ void HuffmanCoding::generateCodes(Node* node, const string& code) {
     generateCodes(node->right, code + "1");
 }
 
-// Encodes the input text using the generated Huffman codes
+// ---------- Encode ----------
 
-string HuffmanCoding::getHeader(int offset) {
-    string headerStr="`";
+std::string HuffmanCoding::getHeader() {
+    std::string headerStr;
     for (const auto& pair : huffmanCodes) {
-        headerStr += pair.first; 
-        headerStr +=pair.second + "`"; 
+        headerStr += pair.first;         // store character
+        headerStr += '|';                // separator before code
+        headerStr += pair.second;        // store its code
+        headerStr += '`';                // separator after code
     }
-    headerStr += to_string(offset);
+    headerStr += "~~"; // marks end of header
     return headerStr;
 }
-int HuffmanCoding::encode(const string& fileName) {
-    ifstream in(fileName);
+
+int HuffmanCoding::encode(const std::string& fileName) {
+    std::ifstream in(fileName);
     if (!in) {
-        cerr << "Failed to open input file: " << fileName << endl;
+        std::cerr << "Failed to open input file: " << fileName << std::endl;
         return 1;
     }
-    string content((istreambuf_iterator<char>(in)), istreambuf_iterator<char>());
+
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     in.close();
+
     buildFrequencyTable(content);
-    buildTree();  // make sure you store root
+    buildTree();
     generateCodes(root, "");
 
-    ofstream outputFile("output.txt", std::ios::binary);
+    std::ofstream outputFile("output.txt", std::ios::binary);
     if (!outputFile) {
-        cerr << "Failed to open output file.\n";
-        return 0;
+        std::cerr << "Failed to open output file.\n";
+        return 1;
     }
 
-    string encodedStr;
+    // Write header
+    std::string codesHeader = getHeader();
+    for (char c : codesHeader) outputFile.put(c);
+
+    // Encode content
     unsigned char buffer = 0;
     int bitsInBuffer = 0;
 
     for (char c : content) {
-        const string& code = huffmanCodes.at(c);
+        const std::string& code = huffmanCodes.at(c);
         for (char bit : code) {
             buffer = (buffer << 1) | (bit - '0');
             bitsInBuffer++;
-
             if (bitsInBuffer == 8) {
                 outputFile.put(buffer);
                 buffer = 0;
@@ -105,102 +144,139 @@ int HuffmanCoding::encode(const string& fileName) {
     int padding = 0;
     if (bitsInBuffer > 0) {
         padding = 8 - bitsInBuffer;
-        buffer <<= padding; // pad remaining bits with 0s
+        buffer <<= padding;
         outputFile.put(buffer);
     }
 
     // Save padding info as last byte
-    string codesHeader = getHeader(padding);
-    for (char c : codesHeader) {
-        outputFile.put(c);
-    }
+    outputFile.put(static_cast<char>(padding));
 
     outputFile.close();
-
     return 0;
 }
 
-string readBinaryDataFromFile(const string& filename) {
-    ifstream file(filename, ios::binary);
+// ---------- Decode ----------
+
+std::string readBinaryDataFromFile(const std::string& filename) {
+    std::ifstream file(filename, std::ios::binary);
     if (!file) {
-        cerr << "Error opening file: " << filename << endl;
+        std::cerr << "Error opening file: " << filename << std::endl;
         return "";
     }
-    string data((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
-    return data;
+    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
-// Decode the encoded string using the Huffman tree
-int HuffmanCoding::decode(const string& filename)  {
-    string fileContent = readBinaryDataFromFile(filename);
-    if (fileContent.empty()) return 0;
+int HuffmanCoding::decode(const std::string& filename) {
+    std::string fileContent = readBinaryDataFromFile(filename);
+    if (fileContent.empty()) return 1;
 
+    // Parse header - CORRECTED LOGIC
     size_t i = 0;
-    string encodedBytes;
+    std::unordered_map<std::string, char> codeToChar;
     
-    // Read encoded bytes (until first '`')
-    while (i < fileContent.size() && fileContent[i] != '`') {
-        encodedBytes += fileContent[i++];
-    }
-
-    ++i; // skip the '`' delimiter
-
-    // Read Huffman map
-    unordered_map<string, char> codeToChar;
-    string temp;
-    while (i < fileContent.size()) {
-        if (fileContent[i] == '`') {
-            // temp format: ch + code => ex: A1001 => map["1001"] = 'A'
-            codeToChar[temp.substr(1)] = temp[0];
-            temp.clear();
-        } else {
-            temp += fileContent[i];
+    while (i < fileContent.size() - 1) {
+        // Check for header end marker
+        if (fileContent[i] == '~' && fileContent[i + 1] == '~') {
+            i += 2; // skip both ~ characters
+            break;
         }
-        ++i;
+        
+        // Read character
+        char character = fileContent[i++];
+        
+        // Expect separator '|'
+        if (i >= fileContent.size() || fileContent[i] != '|') {
+            std::cerr << "Invalid header format: expected '|' separator" << std::endl;
+            return 1;
+        }
+        i++; // skip '|'
+        
+        // Read code until '`' separator
+        std::string code;
+        while (i < fileContent.size() && fileContent[i] != '`') {
+            code += fileContent[i];
+            i++;
+        }
+        
+        if (i >= fileContent.size() || fileContent[i] != '`') {
+            std::cerr << "Invalid header format: expected '`' separator" << std::endl;
+            return 1;
+        }
+        i++; // skip '`'
+        
+        // Store the mapping
+        codeToChar[code] = character;
     }
 
-    // Get padding (offset) from last part of temp
-    int offset = 8 - stoi(temp);
-
-    // Convert encoded bytes to binary string
-    string binaryStr;
-    for (char c : encodedBytes) {
-        binaryStr += bitset<8>(static_cast<unsigned char>(c)).to_string();
+    if (codeToChar.empty()) {
+        std::cerr << "No codes found in header" << std::endl;
+        return 1;
     }
 
-    // Decode binary string using Huffman map
-    string decodedText;
-    string key;
-    for (size_t j = 0; j < binaryStr.size() - offset; ++j) {
-        key += binaryStr[j];
-        if (codeToChar.count(key)) {
-            decodedText += codeToChar[key];
-            key.clear();
+    // Extract padding info (last byte)
+    if (i >= fileContent.size()) {
+        std::cerr << "Invalid file format: no data section" << std::endl;
+        return 1;
+    }
+    
+    int padding = static_cast<unsigned char>(fileContent.back());
+    
+    // Extract encoded data (everything except the last byte which is padding)
+    std::string binaryStr;
+    for (size_t j = i; j < fileContent.size() - 1; j++) {
+        unsigned char byte = static_cast<unsigned char>(fileContent[j]);
+        binaryStr += std::bitset<8>(byte).to_string();
+    }
+
+    // Remove padding bits
+    if (padding > 0 && padding < 8 && padding <= (int)binaryStr.size()) {
+        binaryStr = binaryStr.substr(0, binaryStr.size() - padding);
+    }
+
+    // Decode using the code-to-character mapping
+    std::string decodedText;
+    std::string currentCode;
+    
+    for (char bit : binaryStr) {
+        currentCode += bit;
+        
+        // Check if current code matches any Huffman code
+        auto it = codeToChar.find(currentCode);
+        if (it != codeToChar.end()) {
+            decodedText += it->second;
+            currentCode.clear();
         }
     }
 
-    // Write output to a decoded file
-    ofstream output("decoded_output.txt");
+    // Check if there are any unmatched bits (shouldn't happen with correct encoding)
+    if (!currentCode.empty()) {
+        std::cerr << "Warning: Unmatched code bits remaining: " << currentCode << std::endl;
+    }
+
+    // Write decoded output
+    std::ofstream output("decoded_output.txt");
     if (!output) {
-        cerr << "Failed to write decoded output." << endl;
+        std::cerr << "Failed to write decoded output." << std::endl;
         return 1;
     }
     output << decodedText;
     output.close();
-    return 1;
+    
+    std::cout << "Decoding completed successfully. Output written to decoded_output.txt" << std::endl;
+    return 0;
 }
 
 // ---------- Node Methods ----------
 
 HuffmanCoding::Node::Node(char character, int frequency)
-    : ch(character), freq(frequency), left(nullptr), right(nullptr) { }
+    : ch(character), freq(frequency), left(nullptr), right(nullptr) {}
 
 bool HuffmanCoding::Node::isLeaf() const {
     return !left && !right;
 }
 
-// ---------- Compare Struct ----------
+// ---------- Compare ----------
 
 bool HuffmanCoding::Compare::operator()(const Node* a, const Node* b) {
-    return a->freq > b->freq; // Min-heap: lower freq = higher priority
+    return a->freq > b->freq; // Min-heap
 }
